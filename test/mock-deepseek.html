@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Mock DeepSeek</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; background: #f2f2f2; }
+  #chat { max-width: 720px; margin: 0 auto; padding: 24px 16px 120px; }
+  .ds-message { margin: 14px 0; padding: 10px 14px; border-radius: 10px; background: #fff; }
+  .ds-message.user { background: #dbeafe; margin-left: 80px; }
+  .ds-markdown { white-space: pre-wrap; }
+  .ds-think-content { color: #888; font-size: 12px; border-left: 2px solid #ccc; padding-left: 8px; }
+  .md-code-block { background: #1e1e1e; color: #eee; border-radius: 8px; margin: 8px 0; overflow: hidden; }
+  .md-code-block-banner-wrap { background: #2d2d2d; padding: 4px 10px; font-size: 12px; color: #aaa; }
+  .md-code-block pre { margin: 0; padding: 10px; white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; }
+  #bar { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid #ddd; padding: 12px; display: flex; gap: 8px; }
+  #chat-input { flex: 1; height: 44px; resize: none; border: 1px solid #ccc; border-radius: 8px; padding: 10px; font: inherit; }
+  #send { width: 64px; border: 0; border-radius: 8px; background: #4d6bfe; color: #fff; }
+  #stop { position: fixed; right: 16px; bottom: 84px; background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 6px 10px; display: none; }
+</style>
+</head>
+<body>
+<div id="chat"></div>
+<div id="bar">
+  <textarea id="chat-input" placeholder="给 DeepSeek 发消息"></textarea>
+  <div role="button" aria-label="发送" id="send">发送</div>
+</div>
+<div role="button" aria-label="停止" id="stop">停止</div>
+
+<script>
+(() => {
+  const chat = document.getElementById('chat');
+  const input = document.getElementById('chat-input');
+  const sendBtn = document.getElementById('send');
+  const stopBtn = document.getElementById('stop');
+  let streaming = false;
+  let stopFlag = false;
+  let timer = null;
+
+  function addMessage(role, text) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ds-message ' + role;
+    const md = document.createElement('div');
+    md.className = 'ds-markdown';
+    md.textContent = text;
+    wrap.appendChild(md);
+    chat.appendChild(wrap);
+    return md;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  }
+
+  // 极简 markdown：只处理 ``` 代码块，其余按纯文本
+  function renderMarkdown(mdEl, text) {
+    mdEl.textContent = '';
+    const re = /```([^\n`]*)\n([\s\S]*?)```/g;
+    let last = 0, m;
+    while ((m = re.exec(text))) {
+      const before = text.slice(last, m.index);
+      if (before) mdEl.appendChild(document.createTextNode(before));
+      const block = document.createElement('div');
+      block.className = 'md-code-block';
+      const banner = document.createElement('div');
+      banner.className = 'md-code-block-banner-wrap';
+      const lang = document.createElement('span');
+      lang.className = 'd2a24f03';
+      const s = document.createElement('span');
+      s.textContent = (m[1] || '').trim() || 'text';
+      lang.appendChild(s);
+      banner.appendChild(lang);
+      const pre = document.createElement('pre');
+      pre.textContent = m[2].replace(/\n$/, '');
+      block.append(banner, pre);
+      mdEl.appendChild(block);
+      last = m.index + m[0].length;
+    }
+    const rest = text.slice(last);
+    if (rest) mdEl.appendChild(document.createTextNode(rest));
+  }
+
+  /** @param {string} text */
+  function replyFor(text) {
+    // 首轮输入 = 系统提示词 + --- + 用户消息；只看 --- 之后，别被提示词里的词误触发
+    const sep = '\n---\n';
+    const tail = text.includes(sep) ? text.split(sep).slice(1).join(sep) : text.slice(-400);
+    if (tail.includes('【工具结果】') || text.endsWith('【请继续】')) {
+      if (text.includes('失败')) return '工具失败了。我看一下原因，再换办法。';
+      return '好了，已经写进工作区。你可以在左侧看到调用记录。';
+    }
+    if (tail.includes('危险')) {
+      return '这条命令会删东西，我先确认一下。\n\n```tool\nshell\nRemove-Item -Recurse C:\\Windows\\System32\\drivers\n```\n';
+    }
+    if (tail.includes('写文件')) {
+      return '先写一个文件试试。\n\n```tool\nwrite {"path":"hello.txt"}\n你好，Web Agent！\n```\n\n写完后我会告诉你。';
+    }
+    if (tail.includes('读一下')) {
+      return '```tool\nlist {"path":".","depth":2}\n```';
+    }
+    return '收到。这是 mock 页面的回答。';
+  }
+
+  function streamReply(text) {
+    streaming = true;
+    stopFlag = false;
+    stopBtn.style.display = 'block';
+    const md = addMessage('assistant', '');
+    let i = 0;
+    const step = () => {
+      if (stopFlag) return done();
+      i = Math.min(text.length, i + 3);
+      md.textContent = text.slice(0, i);
+      if (i >= text.length) return done();
+      timer = setTimeout(step, 6);
+    };
+    function done() {
+      clearTimeout(timer);
+      streaming = false;
+      stopBtn.style.display = 'none';
+      renderMarkdown(md, stopFlag ? md.textContent : text);
+    }
+    step();
+  }
+
+  function send() {
+    if (streaming) return;
+    const text = input.value.trim();
+    if (!text) return;
+    addMessage('user', text);
+    input.value = '';
+    setTimeout(() => streamReply(replyFor(text)), 60);
+  }
+
+  sendBtn.addEventListener('click', send);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  stopBtn.addEventListener('click', () => { stopFlag = true; });
+
+  window.__mock = { streaming: () => streaming };
+})();
+</script>
+</body>
+</html>

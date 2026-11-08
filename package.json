@@ -1,0 +1,26 @@
+{
+  "name": "web-agent",
+  "version": "0.2.0",
+  "description": "用网页版 DeepSeek 当你电脑上的编程代理，零 API Key，零依赖。",
+  "type": "module",
+  "main": "web-agent.mjs",
+  "bin": {
+    "web-agent": "web-agent.mjs"
+  },
+  "scripts": {
+    "start": "node web-agent.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
+    "test:unit": "node --test \"test/protocol.test.mjs\" \"test/policy.test.mjs\"",
+    "build:exe": "node build/build-exe.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "postject": "^1.0.0-alpha.6",
+    "rcedit": "^5.0.2"
+  },
+  "license": "AGPL-3.0-only",
+  "private": false
+}
