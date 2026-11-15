@@ -1,0 +1,11 @@
+node_modules/
+.web-agent/
+.tmp-*/
+*.log
+.taste-skill/
+build/*.exe
+build/*.blob
+build/bundle.cjs
+build/sea-config.json
+src/ui-asset.mjs
+build/icon/
